@@ -83,8 +83,9 @@ const createTrailTexture = () => {
 };
 
 // --- Helper: Text to Points ---
-const getTextParticles = (text: string): THREE.Vector3[] => {
+const getTextParticles = (text: string, scale: number): THREE.Vector3[] => {
   const canvas = document.createElement('canvas');
+  // Increase resolution for crisper text on resize
   canvas.width = 2048;
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
@@ -110,9 +111,9 @@ const getTextParticles = (text: string): THREE.Vector3[] => {
     for (let x = 0; x < canvas.width; x += step) {
       const index = (y * canvas.width + x) * 4;
       if (data[index] > 128) {
-        // Map to 3D space - Scale 0.8 to fit 
-        const px = (x - canvas.width / 2) * 0.8;
-        const py = (canvas.height / 2 - y) * 0.8;
+        // Map to 3D space - Scale based on input
+        const px = (x - canvas.width / 2) * scale;
+        const py = (canvas.height / 2 - y) * scale;
         points.push(new THREE.Vector3(px, py, 0));
       }
     }
@@ -541,15 +542,14 @@ const ThreeFireworkEngine: React.FC<ThreeFireworkEngineProps> = ({
   const particleTextureRef = useRef<THREE.Texture | null>(null);
   const trailTextureRef = useRef<THREE.Texture | null>(null);
 
-  // Mouse Tracking
+  // Mouse/Touch Tracking
   const mouseRef = useRef<THREE.Vector3>(new THREE.Vector3(9999, 9999, 0));
 
   useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      // Project mouse to world coordinates roughly at z=0 plane
-      // Camera is at 800. FOV 75.
-      const x = (e.clientX / window.innerWidth) * 2 - 1;
-      const y = -(e.clientY / window.innerHeight) * 2 + 1;
+    const updateInteractionPos = (clientX: number, clientY: number) => {
+      // Project to world coordinates roughly at z=0 plane
+      const x = (clientX / window.innerWidth) * 2 - 1;
+      const y = -(clientY / window.innerHeight) * 2 + 1;
 
       if (sceneRef.current) {
         const cam = sceneRef.current.getObjectByProperty('type', 'PerspectiveCamera') as THREE.Camera;
@@ -563,8 +563,31 @@ const ThreeFireworkEngine: React.FC<ThreeFireworkEngineProps> = ({
         }
       }
     };
+
+    const onMouseMove = (e: MouseEvent) => updateInteractionPos(e.clientX, e.clientY);
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        updateInteractionPos(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+
+    // We also listen to touchstart to trigger immediate reaction
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        updateInteractionPos(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+
     window.addEventListener('mousemove', onMouseMove);
-    return () => window.removeEventListener('mousemove', onMouseMove);
+    window.addEventListener('touchmove', onTouchMove, { passive: false });
+    window.addEventListener('touchstart', onTouchStart, { passive: false });
+
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('touchmove', onTouchMove);
+      window.removeEventListener('touchstart', onTouchStart);
+    };
   }, []);
 
   useEffect(() => {
@@ -574,6 +597,9 @@ const ThreeFireworkEngine: React.FC<ThreeFireworkEngineProps> = ({
     sceneRef.current = scene;
     // Set up camera
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 5000);
+
+    // Adjust camera Z based on screen width for better initial view?
+    // Actually, keeping Z=800 is consistent, we scale text instead.
     camera.position.z = 800;
 
     // Renderer
@@ -691,8 +717,23 @@ const ThreeFireworkEngine: React.FC<ThreeFireworkEngineProps> = ({
       const text1 = "Happy New Year";
       const text2 = specialName || "2026";
 
-      const points1 = getTextParticles(text1);
-      const points2 = getTextParticles(text2);
+      // Calculate Responsive Scale
+      const aspect = window.innerWidth / window.innerHeight;
+      let scale = 0.8; // Desktop default
+
+      if (window.innerWidth < 800) {
+        // Mobile check
+        if (aspect < 1) {
+          // Portrait Mobile: Needs significant scaling to fit width
+          scale = 0.35;
+        } else {
+          // Landscape Mobile
+          scale = 0.5;
+        }
+      }
+
+      const points1 = getTextParticles(text1, scale);
+      const points2 = getTextParticles(text2, scale);
 
       // 1. HAPPY NEW YEAR (Top)
       setTimeout(() => {
@@ -716,8 +757,8 @@ const ThreeFireworkEngine: React.FC<ThreeFireworkEngineProps> = ({
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-[1] pointer-events-none"
-      style={{ background: 'transparent' }}
+      className="fixed inset-0 z-[1]" // Pointer events must be enabled for touch! But parent has pointer-events-none?
+      style={{ background: 'transparent', pointerEvents: 'auto' }} // Actually, we need pointer events for interaction
     />
   );
 };
